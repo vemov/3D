@@ -3,15 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>3D-game</title>
+<title>3D</title>
 <style>
 body{margin:0;overflow:hidden;background-color:#87ceeb;touch-action:none}
 #loader-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;color:#fff;font-family:sans-serif;transition:opacity .5s ease}
 .spinner{width:50px;height:50px;border:4px solid rgba(255,255,255,.1);border-top-color:#4CAF50;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.progress-container{width:300px;height:6px;background:#333;border-radius:3px;overflow:hidden}
-.progress-bar{width:0;height:100%;background:#4CAF50;transition:width .1s ease}
-.progress-text{margin-top:12px;font-size:14px;color:#888;letter-spacing:1px}
+.progress-text{margin-top:12px;font-size:14px;color:#aaa;letter-spacing:1px;text-align:center}
 #coord-display{position:fixed;top:15px;left:15px;z-index:1000;color:#fff;font-family:monospace;font-size:14px;background:rgba(0,0,0,.5);padding:8px 12px;border-radius:4px;pointer-events:none;backdrop-filter:blur(4px)}
 </style>
 <script src="./virtual-controls.js" defer></script>
@@ -23,8 +21,7 @@ body{margin:0;overflow:hidden;background-color:#87ceeb;touch-action:none}
 <div id="loader-overlay">
 <div class="spinner"></div>
 <div style="font-size:18px;font-weight:bold;margin-bottom:15px">正在加载游戏资源...</div>
-<div class="progress-container"><div id="loader-bar" class="progress-bar"></div></div>
-<div id="loader-text" class="progress-text">0%</div>
+<div id="loader-text" class="progress-text">正在初始化...</div>
 </div>
 <div id="coord-display">X: 0.00 | Y: 0.00 | Z: 0.00</div>
 <script type="module">
@@ -49,7 +46,7 @@ const cameraDistance=3.8;
 const playerQuaternion=new THREE.Quaternion(),targetQuaternion=new THREE.Quaternion();
 let playerHeading=0,activeModelName='idle';
 let touchStartX=0,touchStartY=0,isTouching=false;
-let cameraTouchId=null; // 新增：用于独立追踪视角旋转的触点 ID
+let cameraTouchId=null;
 const _forwardDir=new THREE.Vector3(),_rightDir=new THREE.Vector3(),_moveDir=new THREE.Vector3();
 const _raycaster=new THREE.Raycaster(),_rayOrigin=new THREE.Vector3(),_testPos=new THREE.Vector3();
 const maxStepHeight=0.6;
@@ -58,7 +55,16 @@ const slopeDamp=18;
 const capsuleHeight=1.4;
 const capsuleRadius=0.3;
 init();
-function init(){
+function formatBytes(bytes){
+const kb=bytes/1024;
+if(kb<1000){
+return Math.floor(kb)+' KB';
+}else{
+const mb=kb/1024;
+return mb.toFixed(2)+' MB';
+}
+}
+async function init(){
 scene=new THREE.Scene();
 scene.background=new THREE.Color(0x87ceeb);
 scene.fog=new THREE.FogExp2(0x87ceeb,.012);
@@ -95,21 +101,35 @@ scene.add(frontFillLight);
 const rimLight=new THREE.DirectionalLight(0x99ccff,.8);
 rimLight.position.set(0,15,-25);
 scene.add(rimLight);
+const modelNames=['idle','walk','walk_left','walk_right','sprint','jump','setting'];
+const loaderTextEl=document.getElementById('loader-text');
+const loadedBytesMap={};
+const fileUrls=modelNames.map(name=>`./model/${name}.glb`);
 const manager=new THREE.LoadingManager();
-manager.onProgress=(url,itemsLoaded,itemsTotal)=>{
-const percent=Math.floor(itemsLoaded/itemsTotal*100);
-document.getElementById('loader-bar').style.width=percent+'%';
-document.getElementById('loader-text').innerText=percent+'%';
-};
 manager.onLoad=()=>{
 const overlay=document.getElementById('loader-overlay');
 overlay.style.opacity='0';
 setTimeout(()=>overlay.remove(),500);
 };
 const loader=new GLTFLoader(manager);
-const modelNames=['idle','walk','walk_left','walk_right','sprint','jump','setting'];
-modelNames.forEach(name=>{
-loader.load(`./model/${name}.glb`,gltf=>{
+fileUrls.forEach((url,index)=>{
+const name=modelNames[index];
+fetch(url).then(async response=>{
+const reader=response.body.getReader();
+let receivedLength=0;
+const chunks=[];
+while(true){
+const {done,value}=await reader.read();
+if(done)break;
+chunks.push(value);
+receivedLength+=value.length;
+loadedBytesMap[url]=receivedLength;
+const currentTotalLoaded=Object.values(loadedBytesMap).reduce((a,b)=>a+b,0);
+loaderTextEl.innerText=`已加载: ${formatBytes(currentTotalLoaded)}`;
+}
+const blob=new Blob(chunks);
+const blobUrl=URL.createObjectURL(blob);
+loader.load(blobUrl,gltf=>{
 const model=gltf.scene;
 model.traverse(child=>{
 if(child.isMesh){
@@ -145,7 +165,12 @@ mixers[name]=mixer;
 actions[name]=action;
 }
 }
+manager.itemEnd(url);
 });
+},()=>{
+manager.itemStart(url);
+});
+manager.itemStart(url);
 });
 renderer.domElement.addEventListener('click',()=>{
 if(!window.matchMedia('(pointer: coarse)').matches)renderer.domElement.requestPointerLock();
@@ -158,7 +183,6 @@ if(keys.w&&Math.abs(deltaX)>1.5)playerHeading+=Math.PI;
 targetCameraAngleY+=e.movementY*.003;
 targetCameraAngleY=Math.max(.1,Math.min(Math.PI/2-.05,targetCameraAngleY));
 });
-
 window.addEventListener('touchstart',e=>{
 for(let i=0;i<e.changedTouches.length;i++){
 const touch=e.changedTouches[i];
@@ -171,7 +195,6 @@ break;
 }
 }
 },{passive:false});
-
 window.addEventListener('touchmove',e=>{
 if(!isTouching||cameraTouchId===null)return;
 let targetTouch=null;
@@ -190,7 +213,6 @@ if(keys.w&&Math.abs(deltaX)>.05)playerHeading+=Math.PI;
 targetCameraAngleY+=deltaY;
 targetCameraAngleY=Math.max(.1,Math.min(Math.PI/2-.05,targetCameraAngleY));
 },{passive:false});
-
 window.addEventListener('touchend',e=>{
 for(let i=0;i<e.changedTouches.length;i++){
 if(e.changedTouches[i].identifier===cameraTouchId){
@@ -199,7 +221,6 @@ isTouching=false;
 }
 }
 });
-
 window.addEventListener('touchcancel',e=>{
 for(let i=0;i<e.changedTouches.length;i++){
 if(e.changedTouches[i].identifier===cameraTouchId){
@@ -208,7 +229,6 @@ isTouching=false;
 }
 }
 });
-
 window.addEventListener('resize',()=>{
 camera.aspect=window.innerWidth/window.innerHeight;
 camera.updateProjectionMatrix();
