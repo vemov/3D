@@ -1,6 +1,6 @@
 (function () {
     const isMobile = ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 0) ||
-                     window.matchMedia('(pointer: coarse)').matches;
+                    window.matchMedia('(pointer: coarse)').matches;
     if (!isMobile) return;
     const style = document.createElement('style');
     style.innerHTML = `
@@ -167,23 +167,6 @@
         btn.addEventListener('pointerleave', release);
         btn.addEventListener('pointercancel', release);
     }
-    let vLocked = false;
-    function setupToggleButton(elementId, key, code) {
-        const btn = document.getElementById(elementId);
-        if (!btn) return;
-        btn.addEventListener('pointerdown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (vLocked) return;
-            vLocked = true;
-            btn.classList.add('active');
-            sendKeyEvent('keydown', key, code);
-            setTimeout(() => {
-                btn.classList.remove('active');
-                vLocked = false;
-            }, 400);
-        }, { passive: false });
-    }
     function setupVirtualJoystick() {
         const base = document.getElementById('joystick_base');
         const stick = document.getElementById('joystick_stick');
@@ -271,7 +254,7 @@
     window.addEventListener('DOMContentLoaded', () => {
         createControlsDOM();
         setupVirtualJoystick();
-        setupToggleButton('btn_drift', 'v', 'KeyV');
+        setupActionButton('btn_drift', 'v', 'KeyV');
         setupActionButton('btn_backview', 'b', 'KeyB');
         setupActionButton('btn_fire', ' ', 'Space');
         const toggleBtn = document.getElementById('toggle_btn');
