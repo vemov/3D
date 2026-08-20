@@ -1,498 +1,472 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #87ceeb; touch-action: none; }
-        #loader-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #111111;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-            color: #ffffff;
-            font-family: sans-serif;
-            transition: opacity 0.5s ease;
-        }
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #4CAF50;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        .progress-container {
-            width: 300px;
-            height: 6px;
-            background: #333333;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-        .progress-bar {
-            width: 0%;
-            height: 100%;
-            background: #4CAF50;
-            transition: width 0.1s ease;
-        }
-        .progress-text {
-            margin-top: 12px;
-            font-size: 14px;
-            color: #888888;
-            letter-spacing: 1px;
-        }
-        #coord-display {
-            position: fixed;
-            top: 15px;
-            left: 15px;
-            z-index: 1000;
-            color: #ffffff;
-            font-family: monospace;
-            font-size: 14px;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 8px 12px;
-            border-radius: 4px;
-            pointer-events: none;
-            backdrop-filter: blur(4px);
-        }
-    </style>
-    <script src="./virtual-controls.js" defer></script>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "./three@0.160.0/build/three.module.js",
-                "three/addons/": "./three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>3D game</title>
+<style>
+body{margin:0;overflow:hidden;background-color:#87ceeb;touch-action:none}
+#loader-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;color:#fff;font-family:sans-serif;transition:opacity .5s ease}
+.spinner{width:50px;height:50px;border:4px solid rgba(255,255,255,.1);border-top-color:#4CAF50;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.progress-container{width:300px;height:6px;background:#333;border-radius:3px;overflow:hidden}
+.progress-bar{width:0;height:100%;background:#4CAF50;transition:width .1s ease}
+.progress-text{margin-top:12px;font-size:14px;color:#888;letter-spacing:1px}
+#coord-display{position:fixed;top:15px;left:15px;z-index:1000;color:#fff;font-family:monospace;font-size:14px;background:rgba(0,0,0,.5);padding:8px 12px;border-radius:4px;pointer-events:none;backdrop-filter:blur(4px)}
+</style>
+<script src="./virtual-controls.js" defer></script>
+<script type="importmap">
+{"imports":{"three":"./three@0.160.0/build/three.module.js","three/addons/":"./three@0.160.0/examples/jsm/"}}
+</script>
 </head>
 <body>
-    <div id="loader-overlay">
-        <div class="spinner"></div>
-        <div style="font-size: 18px; font-weight: bold; margin-bottom: 15px;">正在加载游戏资源...</div>
-        <div class="progress-container">
-            <div id="loader-bar" class="progress-bar"></div>
-        </div>
-        <div id="loader-text" class="progress-text">0%</div>
-    </div>
-
-    <div id="coord-display">X: 0.00 | Y: 0.00 | Z: 0.00</div>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-
-        let scene, camera, renderer;
-        const models = {};
-        const mixers = {};
-        const actions = {};
-        let clock = new THREE.Clock();
-
-        const initialY = 0.65;
-        const playerPosition = new THREE.Vector3(0, initialY, 0);
-        const currentLookAt = new THREE.Vector3(0, 1.4, 0);
-        
-        const walkSpeed = 3.0;
-        const strafeSpeed = 2.4;
-        const sprintSpeed = 5.8;
-
-        const keys = { w: false, s: false, a: false, d: false, v: false, space: false };
-
-        let isJumping = false;
-        const jumpMoveDir = new THREE.Vector3();
-        let jumpAirSpeed = 0;
-        let jumpTimer = 0;
-        let jumpDuration = 0;
-        let jumpInitialVelocity = 0;
-        const jumpGravity = -24.0;
-
-        let targetCameraAngleX = 0;
-        let targetCameraAngleY = 0.35;
-        let cameraAngleX = 0;
-        let cameraAngleY = 0.35;
-        const cameraDistance = 3.8;
-
-        const playerQuaternion = new THREE.Quaternion();
-        const targetQuaternion = new THREE.Quaternion();
-        let playerHeading = 0;
-
-        let activeModelName = 'idle';
-
-        let touchStartX = 0;
-        let touchStartY = 0;
-        let isTouching = false;
-
-        init();
-
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb);
-            scene.fog = new THREE.FogExp2(0x87ceeb, 0.012);
-
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            renderer.outputColorSpace = THREE.SRGBColorSpace;
-            renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.2;
-            document.body.appendChild(renderer.domElement);
-
-            const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x556644, 0.8);
-            hemiLight.position.set(0, 50, 0);
-            scene.add(hemiLight);
-
-            const dirLight = new THREE.DirectionalLight(0xfffaf0, 1.3);
-            dirLight.position.set(15, 30, 20);
-            dirLight.castShadow = true;
-            dirLight.shadow.mapSize.width = 2048;
-            dirLight.shadow.mapSize.height = 2048;
-            dirLight.shadow.camera.near = 0.5;
-            dirLight.shadow.camera.far = 120;
-            const d = 20;
-            dirLight.shadow.camera.left = -d;
-            dirLight.shadow.camera.right = d;
-            dirLight.shadow.camera.top = d;
-            dirLight.shadow.camera.bottom = -d;
-            dirLight.shadow.bias = -0.0005;
-            scene.add(dirLight);
-
-            const frontFillLight = new THREE.DirectionalLight(0xffffff, 0.6);
-            frontFillLight.position.set(-10, 10, -10);
-            scene.add(frontFillLight);
-
-            const rimLight = new THREE.DirectionalLight(0x99ccff, 0.8);
-            rimLight.position.set(0, 15, -25);
-            scene.add(rimLight);
-
-            const manager = new THREE.LoadingManager();
-            manager.onProgress = (url, itemsLoaded, itemsTotal) => {
-                const percent = Math.floor((itemsLoaded / itemsTotal) * 100);
-                document.getElementById('loader-bar').style.width = percent + '%';
-                document.getElementById('loader-text').innerText = percent + '%';
-            };
-            manager.onLoad = () => {
-                const overlay = document.getElementById('loader-overlay');
-                overlay.style.opacity = '0';
-                setTimeout(() => overlay.remove(), 500);
-            };
-
-            const loader = new GLTFLoader(manager);
-            const modelNames = ['idle', 'walk', 'walk_left', 'walk_right', 'sprint', 'jump', 'setting'];
-
-            modelNames.forEach(name => {
-                loader.load(`./model/${name}.glb`, (gltf) => {
-                    const model = gltf.scene;
-                    model.traverse(child => { 
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                            if (child.material) {
-                                child.material.roughness = Math.max(child.material.roughness, 0.3);
-                                child.material.envMapIntensity = 1.5;
-                            }
-                        }
-                    });
-
-                    if (name === 'setting') {
-                        model.position.set(0, 0, 0);
-                        model.scale.set(8.0, 8.0, 8.0); 
-                        model.visible = true;
-                        scene.add(model);
-                    } else {
-                        model.visible = (name === 'idle');
-                        scene.add(model);
-                        models[name] = model;
-
-                        if (gltf.animations.length > 0) {
-                            const mixer = new THREE.AnimationMixer(model);
-                            const action = mixer.clipAction(gltf.animations[0]);
-                            if (name === 'jump') {
-                                action.setLoop(THREE.LoopOnce, 1);
-                                action.clampWhenFinished = true;
-                            } else {
-                                action.play();
-                            }
-                            mixers[name] = mixer;
-                            actions[name] = action;
-                        }
-                    }
-                });
-            });
-
-            renderer.domElement.addEventListener('click', () => {
-                if (!window.matchMedia("(pointer: coarse)").matches) {
-                    renderer.domElement.requestPointerLock();
-                }
-            });
-
-            window.addEventListener('mousemove', (e) => {
-                if (document.pointerLockElement !== renderer.domElement) return;
-                
-                const deltaX = -e.movementX * 0.003;
-                targetCameraAngleX += deltaX;
-                
-                if (keys.w && Math.abs(deltaX) > 1.5) {
-                    playerHeading += Math.PI;
-                }
-
-                targetCameraAngleY += e.movementY * 0.003;
-                targetCameraAngleY = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, targetCameraAngleY));
-            });
-
-            window.addEventListener('touchstart', (e) => {
-                if (e.touches.length === 1) {
-                    isTouching = true;
-                    touchStartX = e.touches[0].clientX;
-                    touchStartY = e.touches[0].clientY;
-                }
-            }, { passive: false });
-
-            window.addEventListener('touchmove', (e) => {
-                if (!isTouching || e.touches.length !== 1) return;
-                
-                const currentX = e.touches[0].clientX;
-                const currentY = e.touches[0].clientY;
-                
-                const deltaX = (currentX - touchStartX) * 0.005;
-                const deltaY = (currentY - touchStartY) * 0.005;
-                
-                touchStartX = currentX;
-                touchStartY = currentY;
-                
-                targetCameraAngleX -= deltaX;
-                
-                if (keys.w && Math.abs(deltaX) > 0.05) {
-                    playerHeading += Math.PI;
-                }
-
-                targetCameraAngleY += deltaY;
-                targetCameraAngleY = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, targetCameraAngleY));
-            }, { passive: false });
-
-            window.addEventListener('touchend', () => {
-                isTouching = false;
-            });
-
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
-
-            window.addEventListener('keydown', (e) => {
-                const k = e.key.toLowerCase();
-                if (k === 'w' || k === 'arrowup') keys.w = true;
-                if (k === 's' || k === 'arrowdown') keys.s = true;
-                if (k === 'a' || k === 'arrowleft') keys.a = true;
-                if (k === 'd' || k === 'arrowright') keys.d = true;
-                if (k === 'v') keys.v = true;
-                if (e.code === 'Space') {
-                    e.preventDefault();
-                    keys.space = true;
-                }
-            });
-
-            window.addEventListener('keyup', (e) => {
-                const k = e.key.toLowerCase();
-                if (k === 'w' || k === 'arrowup') keys.w = false;
-                if (k === 's' || k === 'arrowdown') keys.s = false;
-                if (k === 'a' || k === 'arrowleft') keys.a = false;
-                if (k === 'd' || k === 'arrowright') keys.d = false;
-                if (k === 'v') keys.v = false;
-                if (e.code === 'Space') keys.space = false;
-            });
-
-            renderer.setAnimationLoop(animate);
-        }
-
-        function animate() {
-            const delta = Math.min(clock.getDelta(), 0.033);
-
-            cameraAngleX = THREE.MathUtils.damp(cameraAngleX, targetCameraAngleX, 12, delta);
-            cameraAngleY = THREE.MathUtils.damp(cameraAngleY, targetCameraAngleY, 12, delta);
-
-            const forwardDir = new THREE.Vector3(-Math.sin(cameraAngleX), 0, -Math.cos(cameraAngleX));
-            const rightDir = new THREE.Vector3(Math.cos(cameraAngleX), 0, -Math.sin(cameraAngleX));
-
-            const moveDir = new THREE.Vector3(0, 0, 0);
-            if (keys.w) moveDir.add(forwardDir);
-            if (keys.s) moveDir.sub(forwardDir);
-            if (keys.a) moveDir.sub(rightDir);
-            if (keys.d) moveDir.add(rightDir);
-
-            const isMoving = moveDir.lengthSq() > 0;
-            if (isMoving) moveDir.normalize();
-
-            let targetModelName = 'idle';
-            let currentSpeed = 0;
-
-            if (keys.space && !isJumping) {
-                isJumping = true;
-                jumpTimer = 0;
-                jumpMoveDir.copy(moveDir);
-
-                if (keys.v && keys.w && !keys.a && !keys.d) {
-                    jumpAirSpeed = sprintSpeed;
-                } else if (keys.a && !keys.d) {
-                    jumpAirSpeed = strafeSpeed;
-                } else if (keys.d && !keys.a) {
-                    jumpAirSpeed = strafeSpeed;
-                } else if (keys.w || keys.s) {
-                    jumpAirSpeed = walkSpeed;
-                } else {
-                    jumpAirSpeed = isMoving ? walkSpeed : 0;
-                }
-
-                if (actions['jump']) {
-                    const jumpAction = actions['jump'];
-                    const clipDuration = jumpAction.getClip().duration;
-                    const timeScale = 1.2;
-                    jumpDuration = clipDuration / timeScale;
-
-                    jumpInitialVelocity = -0.5 * jumpGravity * jumpDuration * 0.6;
-
-                    jumpAction.reset();
-                    jumpAction.play();
-                }
-            }
-
-            if (isJumping) {
-                targetModelName = 'jump';
-
-                const jumpAction = actions['jump'];
-                const jumpMixer = mixers['jump'];
-
-                if (jumpAction && jumpMixer) {
-                    jumpMixer.timeScale = 1.2;
-                    jumpTimer += delta * jumpMixer.timeScale;
-                    jumpMixer.update(delta);
-
-                    playerPosition.y = initialY + jumpInitialVelocity * jumpTimer + 0.5 * jumpGravity * jumpTimer * jumpTimer;
-                    if (playerPosition.y < initialY) playerPosition.y = initialY;
-
-                    if (jumpAirSpeed > 0 && jumpMoveDir.lengthSq() > 0) {
-                        playerPosition.addScaledVector(jumpMoveDir, jumpAirSpeed * delta);
-                    }
-
-                    if (jumpTimer >= jumpDuration || !jumpAction.isRunning()) {
-                        isJumping = false;
-                        playerPosition.y = initialY;
-                    }
-                }
-            } else if (isMoving) {
-                if (keys.v && keys.w && !keys.a && !keys.d) {
-                    targetModelName = 'sprint';
-                    currentSpeed = sprintSpeed;
-                } else if (keys.a && !keys.d) {
-                    targetModelName = 'walk_left';
-                    currentSpeed = strafeSpeed;
-                } else if (keys.d && !keys.a) {
-                    targetModelName = 'walk_right';
-                    currentSpeed = strafeSpeed;
-                } else if (keys.w) {
-                    targetModelName = 'walk';
-                    currentSpeed = walkSpeed;
-                } else if (keys.s) {
-                    targetModelName = 'walk';
-                    currentSpeed = walkSpeed;
-                } else {
-                    targetModelName = 'idle';
-                }
-
-                playerPosition.addScaledVector(moveDir, currentSpeed * delta);
-            }
-
-            if (isMoving && !isJumping) {
-                if (keys.w && keys.a) {
-                    playerHeading = cameraAngleX + Math.PI * 0.75;
-                } else if (keys.w && keys.d) {
-                    playerHeading = cameraAngleX + Math.PI * 1.25;
-                } else {
-                    playerHeading = cameraAngleX + Math.PI;
-                }
-            }
-
-            if (activeModelName !== targetModelName) {
-                if (models[activeModelName]) models[activeModelName].visible = false;
-                activeModelName = targetModelName;
-                if (models[activeModelName]) {
-                    models[activeModelName].visible = true;
-                    if (mixers[activeModelName] && activeModelName !== 'jump') {
-                        mixers[activeModelName].time = 0;
-                    }
-                }
-            }
-
-            targetQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), playerHeading);
-            playerQuaternion.slerp(targetQuaternion, 1.0 - Math.exp(-15 * delta));
-
-            Object.keys(models).forEach(name => {
-                if (models[name]) {
-                    const isVisible = (name === activeModelName);
-                    models[name].visible = isVisible;
-                    if (isVisible) {
-                        models[name].position.copy(playerPosition);
-                        models[name].quaternion.copy(playerQuaternion);
-                        if (mixers[name]) {
-                            if (name === 'jump' && isJumping) return;
-
-                            let timeScale = 1.0;
-                            if (name === 'walk') {
-                                if (keys.s && !keys.w && !keys.a && !keys.d) {
-                                    timeScale = -(currentSpeed / 3.0);
-                                } else {
-                                    timeScale = currentSpeed / 3.0;
-                                }
-                            } else if (name === 'sprint') {
-                                timeScale = currentSpeed / 5.8;
-                            } else if (name === 'walk_left' || name === 'walk_right') {
-                                timeScale = currentSpeed / 2.4;
-                            }
-
-                            mixers[name].timeScale = timeScale;
-                            mixers[name].update(delta);
-                        }
-                    }
-                }
-            });
-
-            const horizontalDist = cameraDistance * Math.cos(cameraAngleY);
-            const verticalDist = cameraDistance * Math.sin(cameraAngleY);
-
-            const targetCameraPosX = playerPosition.x + Math.sin(cameraAngleX) * horizontalDist;
-            const targetCameraPosZ = playerPosition.z + Math.cos(cameraAngleX) * horizontalDist;
-
-            camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCameraPosX, 14, delta);
-            camera.position.y = THREE.MathUtils.damp(camera.position.y, playerPosition.y + verticalDist + 0.4, 14, delta);
-            camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCameraPosZ, 14, delta);
-
-            const targetLookAt = new THREE.Vector3(playerPosition.x, playerPosition.y + 1.4, playerPosition.z);
-            currentLookAt.lerp(targetLookAt, 1.0 - Math.exp(-14 * delta));
-            camera.lookAt(currentLookAt);
-
-            const coordEl = document.getElementById('coord-display');
-            if (coordEl) {
-                coordEl.innerText = `X: ${playerPosition.x.toFixed(2)} | Y: ${playerPosition.y.toFixed(2)} | Z: ${playerPosition.z.toFixed(2)}`;
-            }
-
-            renderer.render(scene, camera);
-        }
-    </script>
+<div id="loader-overlay">
+<div class="spinner"></div>
+<div style="font-size:18px;font-weight:bold;margin-bottom:15px">正在加载游戏资源...</div>
+<div class="progress-container"><div id="loader-bar" class="progress-bar"></div></div>
+<div id="loader-text" class="progress-text">0%</div>
+</div>
+<div id="coord-display">X: 0.00 | Y: 0.00 | Z: 0.00</div>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+let scene,camera,renderer;
+const models={},mixers={},actions={};
+let clock=new THREE.Clock();
+const colliders=[];
+let settingModel=null;
+const initialY=.25;
+const playerPosition=new THREE.Vector3(0,initialY,0);
+const currentLookAt=new THREE.Vector3(0,1.4,0);
+const walkSpeed=2.5,strafeSpeed=3,sprintSpeed=5.8;
+const keys={w:false,s:false,a:false,d:false,v:false,space:false};
+let isJumping=false;
+const jumpMoveDir=new THREE.Vector3();
+let jumpAirSpeed=0,jumpTimer=0,jumpDuration=0,jumpInitialVelocity=0,jumpBaseY=initialY;
+const jumpGravity=-24;
+let targetCameraAngleX=0,targetCameraAngleY=.35,cameraAngleX=0,cameraAngleY=.35;
+const cameraDistance=3.8;
+const playerQuaternion=new THREE.Quaternion(),targetQuaternion=new THREE.Quaternion();
+let playerHeading=0,activeModelName='idle';
+let touchStartX=0,touchStartY=0,isTouching=false;
+let cameraTouchId=null; // 新增：用于独立追踪视角旋转的触点 ID
+const _forwardDir=new THREE.Vector3(),_rightDir=new THREE.Vector3(),_moveDir=new THREE.Vector3();
+const _raycaster=new THREE.Raycaster(),_rayOrigin=new THREE.Vector3(),_testPos=new THREE.Vector3();
+const maxStepHeight=0.6;
+const GROUND_RAY_Y=20;
+const slopeDamp=18;
+const capsuleHeight=1.4;
+const capsuleRadius=0.3;
+init();
+function init(){
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0x87ceeb);
+scene.fog=new THREE.FogExp2(0x87ceeb,.012);
+camera=new THREE.PerspectiveCamera(50,window.innerWidth/window.innerHeight,.1,1000);
+renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.2;
+document.body.appendChild(renderer.domElement);
+const hemiLight=new THREE.HemisphereLight(0xddeeff,0x556644,.8);
+hemiLight.position.set(0,50,0);
+scene.add(hemiLight);
+const dirLight=new THREE.DirectionalLight(0xfffaf0,1.3);
+dirLight.position.set(15,30,20);
+dirLight.castShadow=true;
+dirLight.shadow.mapSize.width=1024;
+dirLight.shadow.mapSize.height=1024;
+dirLight.shadow.camera.near=.5;
+dirLight.shadow.camera.far=120;
+const d=20;
+dirLight.shadow.camera.left=-d;
+dirLight.shadow.camera.right=d;
+dirLight.shadow.camera.top=d;
+dirLight.shadow.camera.bottom=-d;
+dirLight.shadow.bias=-.0005;
+scene.add(dirLight);
+const frontFillLight=new THREE.DirectionalLight(0xffffff,.6);
+frontFillLight.position.set(-10,10,-10);
+scene.add(frontFillLight);
+const rimLight=new THREE.DirectionalLight(0x99ccff,.8);
+rimLight.position.set(0,15,-25);
+scene.add(rimLight);
+const manager=new THREE.LoadingManager();
+manager.onProgress=(url,itemsLoaded,itemsTotal)=>{
+const percent=Math.floor(itemsLoaded/itemsTotal*100);
+document.getElementById('loader-bar').style.width=percent+'%';
+document.getElementById('loader-text').innerText=percent+'%';
+};
+manager.onLoad=()=>{
+const overlay=document.getElementById('loader-overlay');
+overlay.style.opacity='0';
+setTimeout(()=>overlay.remove(),500);
+};
+const loader=new GLTFLoader(manager);
+const modelNames=['idle','walk','walk_left','walk_right','sprint','jump','setting'];
+modelNames.forEach(name=>{
+loader.load(`./model/${name}.glb`,gltf=>{
+const model=gltf.scene;
+model.traverse(child=>{
+if(child.isMesh){
+child.castShadow=true;
+child.receiveShadow=true;
+if(child.material){
+child.material.roughness=Math.max(child.material.roughness,.3);
+child.material.envMapIntensity=1.5;
+child.material.side=THREE.DoubleSide;
+}
+if(name==='setting')colliders.push(child);
+}
+});
+if(name==='setting'){
+model.position.set(0,0,0);
+model.scale.set(3,3,3);
+model.visible=true;
+scene.add(model);
+model.updateMatrixWorld(true);
+settingModel=model;
+}else{
+model.visible=name==='idle';
+scene.add(model);
+models[name]=model;
+if(gltf.animations.length>0){
+const mixer=new THREE.AnimationMixer(model);
+const action=mixer.clipAction(gltf.animations[0]);
+if(name==='jump'){
+action.setLoop(THREE.LoopOnce,1);
+action.clampWhenFinished=true;
+}else action.play();
+mixers[name]=mixer;
+actions[name]=action;
+}
+}
+});
+});
+renderer.domElement.addEventListener('click',()=>{
+if(!window.matchMedia('(pointer: coarse)').matches)renderer.domElement.requestPointerLock();
+});
+window.addEventListener('mousemove',e=>{
+if(document.pointerLockElement!==renderer.domElement)return;
+const deltaX=-e.movementX*.003;
+targetCameraAngleX+=deltaX;
+if(keys.w&&Math.abs(deltaX)>1.5)playerHeading+=Math.PI;
+targetCameraAngleY+=e.movementY*.003;
+targetCameraAngleY=Math.max(.1,Math.min(Math.PI/2-.05,targetCameraAngleY));
+});
+
+window.addEventListener('touchstart',e=>{
+for(let i=0;i<e.changedTouches.length;i++){
+const touch=e.changedTouches[i];
+if(cameraTouchId===null&&touch.clientX>window.innerWidth*0.35){
+cameraTouchId=touch.identifier;
+touchStartX=touch.clientX;
+touchStartY=touch.clientY;
+isTouching=true;
+break;
+}
+}
+},{passive:false});
+
+window.addEventListener('touchmove',e=>{
+if(!isTouching||cameraTouchId===null)return;
+let targetTouch=null;
+for(let i=0;i<e.touches.length;i++){
+if(e.touches[i].identifier===cameraTouchId){
+targetTouch=e.touches[i];
+break;
+}
+}
+if(!targetTouch)return;
+const currentX=targetTouch.clientX,currentY=targetTouch.clientY;
+const deltaX=(currentX-touchStartX)*.005,deltaY=(currentY-touchStartY)*.005;
+touchStartX=currentX;touchStartY=currentY;
+targetCameraAngleX-=deltaX;
+if(keys.w&&Math.abs(deltaX)>.05)playerHeading+=Math.PI;
+targetCameraAngleY+=deltaY;
+targetCameraAngleY=Math.max(.1,Math.min(Math.PI/2-.05,targetCameraAngleY));
+},{passive:false});
+
+window.addEventListener('touchend',e=>{
+for(let i=0;i<e.changedTouches.length;i++){
+if(e.changedTouches[i].identifier===cameraTouchId){
+cameraTouchId=null;
+isTouching=false;
+}
+}
+});
+
+window.addEventListener('touchcancel',e=>{
+for(let i=0;i<e.changedTouches.length;i++){
+if(e.changedTouches[i].identifier===cameraTouchId){
+cameraTouchId=null;
+isTouching=false;
+}
+}
+});
+
+window.addEventListener('resize',()=>{
+camera.aspect=window.innerWidth/window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth,window.innerHeight);
+});
+window.addEventListener('keydown',e=>{
+const k=e.key.toLowerCase();
+if(k==='w'||k==='arrowup')keys.w=true;
+if(k==='s'||k==='arrowdown')keys.s=true;
+if(k==='a'||k==='arrowleft')keys.a=true;
+if(k==='d'||k==='arrowright')keys.d=true;
+if(k==='v')keys.v=true;
+if(e.code==='Space'){e.preventDefault();keys.space=true}
+});
+window.addEventListener('keyup',e=>{
+const k=e.key.toLowerCase();
+if(k==='w'||k==='arrowup')keys.w=false;
+if(k==='s'||k==='arrowdown')keys.s=false;
+if(k==='a'||k==='arrowleft')keys.a=false;
+if(k==='d'||k==='arrowright')keys.d=false;
+if(k==='v')keys.v=false;
+if(e.code==='Space')keys.space=false;
+});
+renderer.setAnimationLoop(animate);
+}
+function getGroundInfo(x,z,currentY=null){
+_rayOrigin.set(x,GROUND_RAY_Y,z);
+_raycaster.set(_rayOrigin,new THREE.Vector3(0,-1,0));
+_raycaster.far=GROUND_RAY_Y+10;
+const hits=_raycaster.intersectObjects(colliders,false);
+if(hits.length===0)return{y:initialY,normalY:1};
+let hit=hits[0];
+if(currentY!==null){
+let bestHit=null;
+let maxValidY=-Infinity;
+for(const h of hits){
+const hDiff=h.point.y-currentY;
+if(hDiff>maxStepHeight+0.3)continue;
+if(hDiff<-2.0)continue;
+if(h.point.y>maxValidY&&h.point.y>=currentY-0.5){
+maxValidY=h.point.y;
+bestHit=h;
+}
+}
+if(!bestHit){
+let bestScore=Infinity;
+for(const h of hits){
+const hDiff=h.point.y-currentY;
+if(hDiff>maxStepHeight+0.3)continue;
+const score=Math.abs(hDiff);
+if(score<bestScore){
+bestScore=score;
+bestHit=h;
+}
+}
+}
+if(bestHit)hit=bestHit;
+}
+let nY=1;
+if(hit.face){
+const n=hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+nY=n.y;
+}
+return{y:hit.point.y,normalY:nY};
+}
+function checkCollisionAndGetGround(fromPos,toPos,jumping,delta){
+_testPos.copy(toPos);
+if(colliders.length===0)return _testPos;
+const info=getGroundInfo(_testPos.x,_testPos.z,fromPos.y);
+const groundY=info.y;
+const isWalkable=info.normalY>0.55;
+if(jumping){
+const moveVec=new THREE.Vector3(_testPos.x-fromPos.x,0,_testPos.z-fromPos.z);
+const moveDist=moveVec.length();
+if(moveDist>.0001){
+const dir=moveVec.normalize();
+_raycaster.set(new THREE.Vector3(fromPos.x,Math.max(fromPos.y,_testPos.y)+.4,fromPos.z),dir);
+_raycaster.far=moveDist+capsuleRadius;
+if(_raycaster.intersectObjects(colliders,false).length>0){
+_testPos.x=fromPos.x;
+_testPos.z=fromPos.z;
+}
+}
+if(_testPos.y<=groundY)_testPos.y=groundY;
+_rayOrigin.set(_testPos.x,_testPos.y+0.5,_testPos.z);
+_raycaster.set(_rayOrigin,new THREE.Vector3(0,1,0));
+_raycaster.far=capsuleHeight-0.5;
+const ceilingHits=_raycaster.intersectObjects(colliders,false);
+if(ceilingHits.length>0){
+const ceilingY=ceilingHits[0].point.y-capsuleHeight;
+if(_testPos.y>ceilingY)_testPos.y=ceilingY;
+}
+return _testPos;
+}
+const moveVec=new THREE.Vector3(_testPos.x-fromPos.x,0,_testPos.z-fromPos.z);
+const moveDist=moveVec.length();
+if(moveDist>.0001){
+const dir=moveVec.normalize();
+_raycaster.set(new THREE.Vector3(fromPos.x,fromPos.y+0.8,fromPos.z),dir);
+_raycaster.far=moveDist+capsuleRadius;
+const upperHits=_raycaster.intersectObjects(colliders,false);
+_raycaster.set(new THREE.Vector3(fromPos.x,fromPos.y+0.2,fromPos.z),dir);
+_raycaster.far=moveDist+capsuleRadius;
+const feetHits=_raycaster.intersectObjects(colliders,false);
+let blocked=false;
+let stepPossible=false;
+let stepY=groundY;
+if(upperHits.length>0){
+blocked=true;
+}else if(feetHits.length>0){
+const hitPoint=feetHits[0].point;
+if(hitPoint.y-fromPos.y<maxStepHeight+0.2){
+_rayOrigin.set(hitPoint.x-dir.x*.08,fromPos.y+maxStepHeight+0.1,hitPoint.z-dir.z*.08);
+_raycaster.set(_rayOrigin,new THREE.Vector3(0,-1,0));
+_raycaster.far=maxStepHeight+0.2;
+const stepHits=_raycaster.intersectObjects(colliders,false);
+if(stepHits.length>0){
+stepY=stepHits[0].point.y;
+const hDiff=stepY-fromPos.y;
+if(hDiff>=0&&hDiff<=maxStepHeight)stepPossible=true;
+}
+}
+if(!stepPossible)blocked=true;
+}
+if(blocked){
+_testPos.x=fromPos.x;
+_testPos.z=fromPos.z;
+}else if(stepPossible){
+_testPos.y=stepY;
+}else{
+const tallDiff=groundY-fromPos.y;
+if(tallDiff>maxStepHeight||!isWalkable){
+_testPos.x=fromPos.x;
+_testPos.z=fromPos.z;
+}
+}
+}
+const finalInfo=getGroundInfo(_testPos.x,_testPos.z,fromPos.y);
+const targetY=finalInfo.y;
+if(finalInfo.normalY>0.55){
+_testPos.y=THREE.MathUtils.damp(fromPos.y,targetY,slopeDamp,delta);
+}else{
+_testPos.y=fromPos.y;
+}
+_rayOrigin.set(_testPos.x,_testPos.y+0.5,_testPos.z);
+_raycaster.set(_rayOrigin,new THREE.Vector3(0,1,0));
+_raycaster.far=capsuleHeight-0.5;
+const ceilingHits=_raycaster.intersectObjects(colliders,false);
+if(ceilingHits.length>0){
+const ceilingY=ceilingHits[0].point.y-capsuleHeight;
+if(_testPos.y>ceilingY)_testPos.y=ceilingY;
+}
+return _testPos;
+}
+function animate(){
+const delta=Math.min(clock.getDelta(),.033);
+cameraAngleX=THREE.MathUtils.damp(cameraAngleX,targetCameraAngleX,12,delta);
+cameraAngleY=THREE.MathUtils.damp(cameraAngleY,targetCameraAngleY,12,delta);
+_forwardDir.set(-Math.sin(cameraAngleX),0,-Math.cos(cameraAngleX));
+_rightDir.set(Math.cos(cameraAngleX),0,-Math.sin(cameraAngleX));
+_moveDir.set(0,0,0);
+if(keys.w)_moveDir.add(_forwardDir);
+if(keys.s)_moveDir.sub(_forwardDir);
+if(keys.a)_moveDir.sub(_rightDir);
+if(keys.d)_moveDir.add(_rightDir);
+const isMoving=_moveDir.lengthSq()>0;
+if(isMoving)_moveDir.normalize();
+let targetModelName='idle',currentSpeed=0;
+if(keys.space&&!isJumping){
+isJumping=true;
+jumpTimer=0;
+jumpMoveDir.copy(_moveDir);
+jumpBaseY=playerPosition.y;
+if(keys.v&&keys.w&&!keys.a&&!keys.d)jumpAirSpeed=sprintSpeed;
+else if(keys.a&&!keys.d)jumpAirSpeed=strafeSpeed;
+else if(keys.d&&!keys.a)jumpAirSpeed=strafeSpeed;
+else if(keys.w||keys.s)jumpAirSpeed=walkSpeed;
+else jumpAirSpeed=isMoving?walkSpeed:0;
+if(actions.jump){
+const jumpAction=actions.jump;
+const clipDuration=jumpAction.getClip().duration;
+const timeScale=1.15;
+jumpDuration=clipDuration/timeScale;
+jumpInitialVelocity=-.5*jumpGravity*jumpDuration*.6;
+jumpAction.reset();
+jumpAction.play();
+}
+}
+const nextPosition=playerPosition.clone();
+if(isJumping){
+targetModelName='jump';
+const jumpAction=actions.jump,jumpMixer=mixers.jump;
+if(jumpAction&&jumpMixer){
+jumpMixer.timeScale=1.4;
+jumpTimer+=delta*jumpMixer.timeScale;
+jumpMixer.update(delta);
+nextPosition.y=jumpBaseY+jumpInitialVelocity*jumpTimer+.5*jumpGravity*jumpTimer*jumpTimer;
+if(jumpAirSpeed>0&&jumpMoveDir.lengthSq()>0)nextPosition.addScaledVector(jumpMoveDir,jumpAirSpeed*delta);
+if(jumpTimer>=jumpDuration||!jumpAction.isRunning())isJumping=false;
+}
+}else if(isMoving){
+if(keys.v&&keys.w&&!keys.a&&!keys.d){targetModelName='sprint';currentSpeed=sprintSpeed}
+else if(keys.a&&!keys.d){targetModelName='walk_left';currentSpeed=strafeSpeed}
+else if(keys.d&&!keys.a){targetModelName='walk_right';currentSpeed=strafeSpeed}
+else if(keys.w||keys.s){targetModelName='walk';currentSpeed=walkSpeed}
+else targetModelName='idle';
+nextPosition.addScaledVector(_moveDir,currentSpeed*delta);
+}
+const safePosition=checkCollisionAndGetGround(playerPosition,nextPosition,isJumping,delta);
+playerPosition.copy(safePosition);
+if(isMoving&&!isJumping){
+if(keys.w&&keys.a)playerHeading=cameraAngleX+Math.PI*.75;
+else if(keys.w&&keys.d)playerHeading=cameraAngleX+Math.PI*1.25;
+else playerHeading=cameraAngleX+Math.PI;
+}
+if(activeModelName!==targetModelName){
+if(models[activeModelName])models[activeModelName].visible=false;
+activeModelName=targetModelName;
+if(models[activeModelName]){
+models[activeModelName].visible=true;
+if(mixers[activeModelName]&&activeModelName!=='jump')mixers[activeModelName].time=0;
+}
+}
+targetQuaternion.setFromAxisAngle(new THREE.Vector3(0,1,0),playerHeading);
+playerQuaternion.slerp(targetQuaternion,1-Math.exp(-15*delta));
+Object.keys(models).forEach(name=>{
+if(models[name]){
+const isVisible=name===activeModelName;
+models[name].visible=isVisible;
+if(isVisible){
+models[name].position.copy(playerPosition);
+models[name].quaternion.copy(playerQuaternion);
+if(mixers[name]){
+if(name==='jump'&&isJumping)return;
+let timeScale=1;
+if(name==='walk')timeScale=keys.s&&!keys.w&&!keys.a&&!keys.d?-(currentSpeed/0.9):currentSpeed/0.9;
+else if(name==='sprint')timeScale=currentSpeed/5.8;
+else if(name==='walk_left'||name==='walk_right')timeScale=currentSpeed/1.4;
+mixers[name].timeScale=timeScale;
+mixers[name].update(delta);
+}
+}
+}
+});
+const horizontalDist=cameraDistance*Math.cos(cameraAngleY);
+const verticalDist=cameraDistance*Math.sin(cameraAngleY);
+const targetCameraPosX=playerPosition.x+Math.sin(cameraAngleX)*horizontalDist;
+const targetCameraPosZ=playerPosition.z+Math.cos(cameraAngleX)*horizontalDist;
+camera.position.x=THREE.MathUtils.damp(camera.position.x,targetCameraPosX,14,delta);
+camera.position.y=THREE.MathUtils.damp(camera.position.y,playerPosition.y+verticalDist+.4,14,delta);
+camera.position.z=THREE.MathUtils.damp(camera.position.z,targetCameraPosZ,14,delta);
+const targetLookAt=new THREE.Vector3(playerPosition.x,playerPosition.y+1.4,playerPosition.z);
+currentLookAt.lerp(targetLookAt,1-Math.exp(-14*delta));
+camera.lookAt(currentLookAt);
+const coordEl=document.getElementById('coord-display');
+if(coordEl)coordEl.innerText=`X: ${playerPosition.x.toFixed(2)} | Y: ${playerPosition.y.toFixed(2)} | Z: ${playerPosition.z.toFixed(2)}`;
+renderer.render(scene,camera);
+}
+</script>
 </body>
 </html>
